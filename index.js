@@ -1,9 +1,9 @@
 import express from "express";
 import 'dotenv/config' 
-
-
 import cors from 'cors'
 import { MongoClient } from "mongodb";
+
+
 const app = express();
 
 app.use(cors());
@@ -25,8 +25,13 @@ export async function connectToMongoDB() {
 }
 const mongoClient = await connectToMongoDB();
 const db = mongoClient.db("studio-store");
+const featuredCollections = db.collection("featured");
 
 
+app.get('/featureds',async(req,res)=>{
+    const result = await featuredCollections.find().limit(6).toArray();
+    res.send(result)
+})
 app.get('/', (req, res) => {
   res.send('Hello World!');
 });
