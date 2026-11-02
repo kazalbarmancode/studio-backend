@@ -1,7 +1,7 @@
 import express from "express";
 import "dotenv/config";
 import cors from "cors";
-import { MongoClient, ObjectId } from "mongodb";
+import { MongoClient } from "mongodb";
 
 const app = express();
 
@@ -9,9 +9,6 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 5000;
-if (!process.env.MONGO_DB_URL) {
-  console.error("CRITICAL ERROR: MONGO_DB_URL is not defined in environment variables!");
-}
 
 const client = new MongoClient(process.env.MONGO_DB_URL);
 export async function connectToMongoDB() {
@@ -29,8 +26,31 @@ const featuredCollections = db.collection("featured");
 const catagoryCollections = db.collection("catagory");
 const bookingCollections = db.collection("how_it_works");
 const guaranteeCollection = db.collection("host_guarantee");
+const studiosCollection = db.collection("studioData");
 
-
+app.post("/studioData", async (req, res) => {
+  try {
+    const studioData = req.body;
+    const newStudio = {
+      ...studioData,
+      createdAt: new Date(),
+    };
+    
+    const result = await studiosCollection.insertOne(newStudio);
+    
+    res.status(200).json({
+      success: true,
+      insertedId: result.insertedId,
+      message: "Studio added successfully!"
+    });
+  } catch (error) {
+    console.error("Database Insert Error:", error); 
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error"
+    });
+  }
+});
 
 app.get("/host_guarantee", async (req, res) => {
   try {
@@ -79,9 +99,12 @@ app.get("/catagory", async (req, res) => {
 });
 
 app.get("/", (req, res) => {
-  res.send("Hello World!");
+  res.send("Store Server Backend Running");
 });
 
 app.listen(PORT, () => {
   console.log(`server run succecfully in ${PORT}`);
 });
+export default (req, res) => {
+  return app(req, res);
+};
