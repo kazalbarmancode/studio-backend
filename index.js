@@ -1,7 +1,7 @@
 import express from "express";
 import "dotenv/config";
 import cors from "cors";
-import { MongoClient } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
 
 const app = express();
 
@@ -26,7 +26,8 @@ const featuredCollections = db.collection("featured");
 const catagoryCollections = db.collection("catagory");
 const bookingCollections = db.collection("how_it_works");
 const guaranteeCollection = db.collection("host_guarantee");
-const studiosCollection = db.collection("studioData");
+const bookingCollection = db.collection("bookings");
+
 
 app.post("/studioData", async (req, res) => {
   try {
@@ -35,20 +36,79 @@ app.post("/studioData", async (req, res) => {
       ...studioData,
       createdAt: new Date(),
     };
-    
-    const result = await studiosCollection.insertOne(newStudio);
-    
+
+    const result = await featuredCollections.insertOne(newStudio);
+
     res.status(200).json({
       success: true,
       insertedId: result.insertedId,
-      message: "Studio added successfully!"
+      message: "Studio added successfully!",
     });
   } catch (error) {
-    console.error("Database Insert Error:", error); 
+    console.error("Database Insert Error:", error);
     res.status(500).json({
       success: false,
-      message: "Internal Server Error"
+      message: "Internal Server Error",
     });
+  }
+});
+
+app.get("/studioData/email", async (req, res) => {
+  const email = req.query.email;
+  const query = { ownerEmail: { $regex: new RegExp(`^${email}$`, "i") } };
+  const result = await featuredCollections.find(query).toArray();
+  res.send(result);
+});
+
+app.delete("/studioData/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
+    const result = await featuredCollections.deleteOne(query);
+
+    if (result.deletedCount > 0) {
+      res.send({
+        success: true,
+        deletedCount: result.deletedCount,
+        message: "Studio deleted successfully",
+      });
+    } else {
+      res.status(404).send({ success: false, message: "Studio not found" });
+    }
+  } catch (error) {
+    console.error("Error deleting studio:", error);
+    res.status(500).send({ error: "Failed to delete studio" });
+  }
+});
+app.patch("/studioData/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    if (!ObjectId.isValid(id)) {
+      return res
+        .status(400)
+        .send({ success: false, message: "Invalid Studio ID format" });
+    }
+
+    const updatedData = req.body;
+
+    delete updatedData._id;
+
+    const filter = { _id: new ObjectId(id) };
+    const updateDoc = {
+      $set: updatedData,
+    };
+
+    const result = await featuredCollections.updateOne(filter, updateDoc);
+
+    res.send({ success: true, result });
+  } catch (error) {
+    console.error("CRITICAL BACKEND ERROR:", error);
+    res
+      .status(500)
+      .send({
+        success: false,
+        message: error.message || "Failed to update studio",
+      });
   }
 });
 
@@ -67,12 +127,12 @@ app.get("/how_it_works", async (req, res) => {
   res.send(result);
 });
 
-app.get("/featureds", async (req, res) => {
+app.get("/studioData", async (req, res) => {
   const result = await featuredCollections.find().limit(6).toArray();
   res.send(result);
 });
 
-app.get("/allFeatureds", async (req, res) => {
+app.get("/allStudioData", async (req, res) => {
   try {
     const category = req.query.category;
     let query = {};
@@ -88,7 +148,7 @@ app.get("/allFeatureds", async (req, res) => {
   }
 });
 
-app.get("/featureds/:id", async (req, res) => {
+app.get("/studioData/:id", async (req, res) => {
   const { id } = req.params;
   const result = await featuredCollections.findOne({ _id: id });
   res.send(result);
@@ -97,7 +157,22 @@ app.get("/catagory", async (req, res) => {
   const result = await catagoryCollections.find().toArray();
   res.send(result);
 });
+app.post("/booking", async (req, res) => {
+  const data = req.body;
+  const result = await bookingCollection.insertOne(data);
+  res.send(result);
+});
+app.get("/my-bookings/:email", async (req, res) => {
+  const { email } = req.params;
+  const result = await bookingCollection.find({ userEmail: email }).toArray();
+  res.send(result);
+});
 
+app.delete("/my-bookings/:id", async (req, res) => {
+  const { id } = req.params;
+  const result = await bookingCollection.deleteOne({ _id: new ObjectId(id) });
+  res.send(result);
+});
 app.get("/", (req, res) => {
   res.send("Store Server Backend Running");
 });
