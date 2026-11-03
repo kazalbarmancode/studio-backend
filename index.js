@@ -2,6 +2,7 @@ import express from "express";
 import "dotenv/config";
 import cors from "cors";
 import { MongoClient, ObjectId } from "mongodb";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 
 const app = express();
 
@@ -28,8 +29,29 @@ const bookingCollections = db.collection("how_it_works");
 const guaranteeCollection = db.collection("host_guarantee");
 const bookingCollection = db.collection("bookings");
 
+const verifyToken = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).send({ msg: "Unauthorized!" });
+  }
+  const token = authHeader.split(" ")[1];
+  if (!token) {
+    return res.status(401).send({ msg: "Unauthorized!" });
+  }
 
-app.post("/studioData", async (req, res) => {
+  const JWKS = createRemoteJWKSet(
+    new URL(`${process.env.CAT_HARRY_CLIENT_URL}/api/auth/jwks`),
+  );
+
+  try {
+    const { payload } = await jwtVerify(token, JWKS);
+    console.log(payload);
+    next();
+  } catch (error) {
+    return res.status(401).send({ msg: "Server Error!" });
+  }
+};
+app.post("/studioData", verifyToken, async (req, res) => {
   try {
     const studioData = req.body;
     const newStudio = {
@@ -60,24 +82,45 @@ app.get("/studioData/email", async (req, res) => {
   res.send(result);
 });
 
-app.delete("/studioData/:id", async (req, res) => {
+app.delete("/studioData/:id", verifyToken, async (req, res) => {
   try {
     const id = req.params.id;
-    const query = { _id: new ObjectId(id) };
-    const result = await featuredCollections.deleteOne(query);
 
-    if (result.deletedCount > 0) {
-      res.send({
-        success: true,
-        deletedCount: result.deletedCount,
-        message: "Studio deleted successfully",
-      });
-    } else {
-      res.status(404).send({ success: false, message: "Studio not found" });
+    if (!ObjectId.isValid(id)) {
+      return res
+        .status(400)
+        .send({ success: false, message: "Invalid Studio ID format" });
     }
+
+    const studio = await featuredCollections.findOne({ _id: new ObjectId(id) });
+
+    if (!studio) {
+      return res
+        .status(404)
+        .send({ success: false, message: "Studio not found" });
+    }
+
+    const userEmail = req.user?.email;
+
+    if (studio.ownerEmail !== userEmail) {
+      return res.status(401).send({
+        success: false,
+        message: "Forbidden! You can only delete your own studio listing.",
+      });
+    }
+
+    const result = await featuredCollections.deleteOne({
+      _id: new ObjectId(id),
+    });
+
+    res.send({
+      success: true,
+      deletedCount: result.deletedCount,
+      message: "Studio deleted successfully",
+    });
   } catch (error) {
     console.error("Error deleting studio:", error);
-    res.status(500).send({ error: "Failed to delete studio" });
+    res.status(500).send({ success: false, error: "Failed to delete studio" });
   }
 });
 app.patch("/studioData/:id", async (req, res) => {
@@ -103,12 +146,10 @@ app.patch("/studioData/:id", async (req, res) => {
     res.send({ success: true, result });
   } catch (error) {
     console.error("CRITICAL BACKEND ERROR:", error);
-    res
-      .status(500)
-      .send({
-        success: false,
-        message: error.message || "Failed to update studio",
-      });
+    res.status(500).send({
+      success: false,
+      message: error.message || "Failed to update studio",
+    });
   }
 });
 
@@ -138,7 +179,7 @@ app.get("/allStudioData", async (req, res) => {
     let query = {};
 
     if (category) {
-      query = { category: { $regex: category, $options: "i" } };
+      query = { category: { $regex: new RegExp(`^${category}$`, "i") } };
     }
 
     const result = await featuredCollections.find(query).toArray();
@@ -149,15 +190,39 @@ app.get("/allStudioData", async (req, res) => {
 });
 
 app.get("/studioData/:id", async (req, res) => {
-  const { id } = req.params;
-  const result = await featuredCollections.findOne({ _id: id });
-  res.send(result);
+  try {
+    const { id } = req.params;
+    console.log("Backend received ID:", id);
+
+    let query;
+    if (ObjectId.isValid(id)) {
+      query = {
+        $or: [{ _id: id }, { _id: new ObjectId(id) }],
+      };
+    } else {
+      query = { _id: id };
+    }
+
+    const result = await featuredCollections.findOne(query);
+    console.log("Database query result:", result);
+
+    if (!result) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Studio not found" });
+    }
+
+    res.send(result);
+  } catch (error) {
+    console.error("Server error:", error);
+    res.status(500).send({ error: "Server error" });
+  }
 });
 app.get("/catagory", async (req, res) => {
   const result = await catagoryCollections.find().toArray();
   res.send(result);
 });
-app.post("/booking", async (req, res) => {
+app.post("/booking", verifyToken, async (req, res) => {
   const data = req.body;
   const result = await bookingCollection.insertOne(data);
   res.send(result);
