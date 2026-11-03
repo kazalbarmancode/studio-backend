@@ -29,26 +29,27 @@ const bookingCollections = db.collection("how_it_works");
 const guaranteeCollection = db.collection("host_guarantee");
 const bookingCollection = db.collection("bookings");
 
+
 const verifyToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader) {
-    return res.status(401).send({ msg: "Unauthorized!" });
-  }
-  const token = authHeader.split(" ")[1];
-  if (!token) {
-    return res.status(401).send({ msg: "Unauthorized!" });
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).send({ msg: "Unauthorized! No token provided." });
   }
 
+  const token = authHeader.split(" ")[1];
   const JWKS = createRemoteJWKSet(
     new URL(`${process.env.CAT_HARRY_CLIENT_URL}/api/auth/jwks`),
   );
 
   try {
     const { payload } = await jwtVerify(token, JWKS);
-    console.log(payload);
+    
+    req.user = payload; 
+
     next();
   } catch (error) {
-    return res.status(401).send({ msg: "Server Error!" });
+    console.error("JWT Error:", error.message);
+    return res.status(401).send({ msg: "Unauthorized! Invalid token." });
   }
 };
 app.post("/studioData", verifyToken, async (req, res) => {
@@ -81,37 +82,29 @@ app.get("/studioData/email", async (req, res) => {
   const result = await featuredCollections.find(query).toArray();
   res.send(result);
 });
-
 app.delete("/studioData/:id", verifyToken, async (req, res) => {
   try {
     const id = req.params.id;
 
     if (!ObjectId.isValid(id)) {
-      return res
-        .status(400)
-        .send({ success: false, message: "Invalid Studio ID format" });
+      return res.status(400).send({ success: false, message: "Invalid ID format" });
     }
 
     const studio = await featuredCollections.findOne({ _id: new ObjectId(id) });
 
     if (!studio) {
-      return res
-        .status(404)
-        .send({ success: false, message: "Studio not found" });
+      return res.status(404).send({ success: false, message: "Studio not found" });
     }
 
     const userEmail = req.user?.email;
-
     if (studio.ownerEmail !== userEmail) {
-      return res.status(401).send({
+      return res.status(403).send({
         success: false,
         message: "Forbidden! You can only delete your own studio listing.",
       });
     }
 
-    const result = await featuredCollections.deleteOne({
-      _id: new ObjectId(id),
-    });
+    const result = await featuredCollections.deleteOne({ _id: new ObjectId(id) });
 
     res.send({
       success: true,
@@ -123,7 +116,7 @@ app.delete("/studioData/:id", verifyToken, async (req, res) => {
     res.status(500).send({ success: false, error: "Failed to delete studio" });
   }
 });
-app.patch("/studioData/:id", async (req, res) => {
+app.patch("/studioData/:id",verifyToken, async (req, res) => {
   try {
     const id = req.params.id;
     if (!ObjectId.isValid(id)) {
@@ -223,20 +216,78 @@ app.get("/catagory", async (req, res) => {
   res.send(result);
 });
 app.post("/booking", verifyToken, async (req, res) => {
-  const data = req.body;
-  const result = await bookingCollection.insertOne(data);
-  res.send(result);
+  try {
+    const data = req.body;
+    const userEmail = req.user?.email;
+
+    if (!userEmail) {
+      return res.status(401).send({ success: false, message: "Unauthorized user!" });
+    }
+
+   
+
+    const newBooking = {
+      ...data,
+      userEmail: userEmail, 
+      status: "Confirmed",
+      createdAt: new Date(),
+    };
+
+    const result = await bookingCollection.insertOne(newBooking);
+
+    res.send({
+      success: true,
+      insertedId: result.insertedId,
+      message: "Studio booked successfully!",
+    });
+  } catch (error) {
+    console.error("Booking Error:", error);
+    res.status(500).send({ success: false, error: "Failed to create booking" });
+  }
 });
 app.get("/my-bookings/:email", async (req, res) => {
   const { email } = req.params;
   const result = await bookingCollection.find({ userEmail: email }).toArray();
   res.send(result);
 });
+app.delete("/my-bookings/:id", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const loggedInEmail = req.user?.email; 
 
-app.delete("/my-bookings/:id", async (req, res) => {
-  const { id } = req.params;
-  const result = await bookingCollection.deleteOne({ _id: new ObjectId(id) });
-  res.send(result);
+    const booking = await bookingCollection.findOne({ _id: new ObjectId(id) });
+
+    if (!booking) {
+      return res.status(404).send({ success: false, message: "Booking not found" });
+    }
+
+    console.log("Logged-in User Email from Token:", loggedInEmail);
+    console.log("Booking Doc Email Fields:", {
+      userEmail: booking.userEmail,
+      email: booking.email,
+      allBookingData: booking
+    });
+
+    const bookingOwnerEmail = booking.userEmail || booking.email;
+
+    if (bookingOwnerEmail !== loggedInEmail) {
+      return res.status(403).send({
+        success: false,
+        message: "Forbidden! You can only delete your own bookings.",
+      });
+    }
+
+    const result = await bookingCollection.deleteOne({ _id: new ObjectId(id) });
+
+    res.send({
+      success: true,
+      deletedCount: result.deletedCount,
+      message: "Booking deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting booking:", error);
+    res.status(500).send({ success: false, error: "Failed to delete booking" });
+  }
 });
 app.get("/", (req, res) => {
   res.send("Store Server Backend Running");
