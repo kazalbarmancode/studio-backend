@@ -185,8 +185,6 @@ app.get("/allStudioData", async (req, res) => {
 app.get("/studioData/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    console.log("Backend received ID:", id);
-
     let query;
     if (ObjectId.isValid(id)) {
       query = {
